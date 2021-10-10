@@ -1,19 +1,18 @@
 package documents
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/hachi-n/full-text-search-engine/internal/architecture"
-	"io"
+	"github.com/hachi-n/full-text-search-engine/internal/util"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-type ID int
-type TextFilePath string
-type NgramDocument map[ID]TextFilePath
+type ID = int
+type TextFilePath = string
+
+type NgramDocumentMap map[ID]TextFilePath
 
 const (
 	documentMapFileName = "document.map"
@@ -23,28 +22,21 @@ var (
 	documentMapFilePath = filepath.Join(architecture.DatabaseDir, documentMapFileName)
 )
 
-func NewNgramDocument() NgramDocument {
-	var document = make(NgramDocument)
+func NewNgramDocumentMap() NgramDocumentMap {
+	var document = make(NgramDocumentMap)
 	if _, err := os.Stat(documentMapFilePath); err != nil {
 		return document
 	}
-	f, err := os.Open(documentMapFilePath)
-	if err != nil {
+
+	if err := util.LoadJsonFile(documentMapFilePath, &document); err != nil {
 		fmt.Errorf("error: %v", err)
 	}
-	defer f.Close()
-	b, err := io.ReadAll(f)
-	if err != nil {
-		fmt.Errorf("error: %v", err)
-	}
-	if err := json.Unmarshal(b, &document); err != nil {
-		fmt.Errorf("error: %v", err)
-	}
+
 	return document
 }
 
-func (document NgramDocument) Save() error {
-	jsonByte, err := json.MarshalIndent(document, "", strings.Repeat(" ", 4))
+func (document NgramDocumentMap) Save() error {
+	jsonByte, err := util.PrettyJson(document)
 	if err != nil {
 		return err
 	}
@@ -54,29 +46,14 @@ func (document NgramDocument) Save() error {
 	return nil
 }
 
-func (document NgramDocument) Add(textFilePath TextFilePath) error {
-	textFilePathStr := string(textFilePath)
-	documentDataFilePathStr := filepath.Join(architecture.DataDir, filepath.Base(textFilePathStr))
-	documentDataFilePath := TextFilePath(documentDataFilePathStr)
-
-	id := document.lastDocumentId()
+func (document NgramDocumentMap) Add(textFilePath TextFilePath) error {
+	documentDataFilePath := filepath.Join(architecture.DataDir, filepath.Base(textFilePath))
+	id := document.LastDocumentId()
 	id++
 	document[id] = documentDataFilePath
 	lastDocumentId = id
 
-	reader, err := os.Open(textFilePathStr)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-
-	writer, err := os.Create(documentDataFilePathStr)
-	if err != nil {
-		return err
-	}
-	defer writer.Close()
-	_, err = io.Copy(writer, reader)
-	if err != nil {
+	if err := util.FileCopy(documentDataFilePath, textFilePath); err != nil {
 		return err
 	}
 
@@ -84,7 +61,8 @@ func (document NgramDocument) Add(textFilePath TextFilePath) error {
 }
 
 var lastDocumentId ID
-func (document NgramDocument) LastDocumentId() ID {
+
+func (document NgramDocumentMap) LastDocumentId() ID {
 	if lastDocumentId != 0 {
 		return lastDocumentId
 	}
@@ -95,4 +73,12 @@ func (document NgramDocument) LastDocumentId() ID {
 		}
 	}
 	return max
+}
+
+func (document NgramDocumentMap) Search(ids []ID) []TextFilePath {
+	var paths []TextFilePath
+	for _, id := range ids {
+		paths = append(paths, document[id])
+	}
+	return paths
 }
